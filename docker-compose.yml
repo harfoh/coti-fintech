@@ -1,0 +1,42 @@
+
+services:
+  coti-payment-api:
+    image: ${IMAGE_NAME:-coti-fintech-payment-api}:${IMAGE_TAG:-latest}
+    container_name: coti-payment-api-staging
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=staging
+      - APP_VERSION=${IMAGE_TAG:-1.0.0}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - coti-fintech-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: coti-nginx-staging
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      coti-payment-api:
+        condition: service_healthy
+    networks:
+      - coti-fintech-net
+    restart: unless-stopped
+
+networks:
+  coti-fintech-net:
+    driver: bridge

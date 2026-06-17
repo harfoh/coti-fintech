@@ -1,0 +1,257 @@
+name: Coti Fintech CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/coti-fintech-payment-api
+
+jobs:
+  # Unittests 
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r app/requirements.txt
+
+      - name: Run unit tests
+        run: |
+          cd app
+          pytest tests/ -v --tb=short --junitxml=test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: app/test-results.xml
+
+  # build docker Image 
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev-latest,enable=${{ github.ref == 'refs/heads/develop' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  #Trivy security sCan 
+  security-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image for scanning
+        run: docker pull ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"
+
+      - name: Trivy summary table
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          exit-code: "0"
+
+  # Deploy to Dev (develop branch only)
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: security-scan
+    environment: dev
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy to dev
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: |
+          docker compose -f docker-compose.dev.yml pull coti-payment-api 2>/dev/null || true
+          docker compose -f docker-compose.dev.yml up -d --remove-orphans
+          echo "⏳ Waiting for health check..."
+          sleep 15
+
+      - name: Verify dev health
+        run: |
+          RETRIES=5
+          for i in $(seq 1 $RETRIES); do
+            STATUS=$(curl -sf http://localhost:8001/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'])" 2>/dev/null || echo "fail")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✅ Dev health check passed"
+              break
+            fi
+            echo "Attempt $i/$RETRIES failed, retrying..."
+            sleep 5
+          done
+          [ "$STATUS" = "healthy" ] || (echo "❌ Dev health check failed" && exit 1)
+
+      - name: Print dev logs
+        if: always()
+        run: docker compose -f docker-compose.dev.yml logs coti-payment-api --tail=50
+
+      - name: Rollback dev on failure
+        if: failure()
+        run: |
+          echo "⚠️ Dev deployment failed — rolling back"
+          PREV_TAG=$(docker images ${{ env.IMAGE_NAME }} --format "{{.Tag}}" | grep sha- | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            IMAGE_TAG=$PREV_TAG docker compose -f docker-compose.dev.yml up -d --remove-orphans
+            echo "✅ Rolled back to $PREV_TAG"
+          else
+            docker compose -f docker-compose.dev.yml down
+          fi
+
+      - name: Dev deployment summary
+        run: |
+          echo "### 🛠️ Dev Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`develop\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Port | \`8001\` (API) · \`8080\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
+
+  # Deploy to Staging (main branch only) 
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: security-scan
+    environment: staging
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy to staging
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: |
+          docker compose pull coti-payment-api 2>/dev/null || true
+          docker compose up -d --remove-orphans
+          echo "⏳ Waiting for health check..."
+          sleep 15
+
+      - name: Verify staging health
+        run: |
+          RETRIES=5
+          for i in $(seq 1 $RETRIES); do
+            STATUS=$(curl -sf http://localhost:8000/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'])" 2>/dev/null || echo "fail")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✅ Staging health check passed"
+              break
+            fi
+            echo "Attempt $i/$RETRIES failed, retrying..."
+            sleep 5
+          done
+          [ "$STATUS" = "healthy" ] || (echo "❌ Staging health check failed" && exit 1)
+
+      - name: Print staging logs
+        if: always()
+        run: docker compose logs coti-payment-api --tail=50
+
+      - name: Rollback staging on failure
+        if: failure()
+        run: |
+          echo "⚠️ Staging deployment failed — rolling back"
+          PREV_TAG=$(docker images ${{ env.IMAGE_NAME }} --format "{{.Tag}}" | grep sha- | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            IMAGE_TAG=$PREV_TAG docker compose up -d --remove-orphans
+            echo "✅ Rolled back to $PREV_TAG"
+          else
+            docker compose down
+          fi
+
+      - name: Staging deployment summary
+        run: |
+          echo "### 🚀 Staging Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`main\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Port | \`8000\` (API) · \`80\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
