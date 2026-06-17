@@ -1,3 +1,4 @@
+cat > .github/workflows/pipeline.yml << 'EOF'
 name: Coti Fintech CI/CD Pipeline
 
 on:
@@ -10,7 +11,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/coti-fintech-payment-api
 
 jobs:
-  # Unit Tests 
+  #  Unitests 
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -80,7 +81,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  #  Trivy Security sCan 
+  #  Trivy Security SCan 
   security-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
@@ -100,18 +101,18 @@ jobs:
         run: docker pull ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
 
       - name: Run Trivy vulnerability scanner
-              uses: aquasecurity/trivy-action@master
-              with:
-                image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
-                format: "sarif"
-                output: "trivy-results.sarif"
-                severity: "HIGH,CRITICAL"
-                exit-code: "1"
-                ignore-unfixed: true
-                vuln-type: "library"
-                trivyignores: .trivyignore
-              env:
-                TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "library"
+          trivyignores: .trivyignore
+        env:
+          TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
 
       - name: Upload Trivy SARIF report
         uses: github/codeql-action/upload-sarif@v3
@@ -120,18 +121,18 @@ jobs:
           sarif_file: "trivy-results.sarif"
 
       - name: Trivy summary table
-              if: always()
-              uses: aquasecurity/trivy-action@master
-              with:
-                image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
-                format: "table"
-                severity: "HIGH,CRITICAL"
-                exit-code: "0"
-                ignore-unfixed: true
-                vuln-type: "library"
-                trivyignores: .trivyignore
-              env:
-                TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: "library"
+          trivyignores: .trivyignore
+        env:
+          TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
 
   #  Deploy to Dev (develop branch only) 
   deploy-dev:
@@ -268,3 +269,4 @@ jobs:
           echo "| Branch | \`main\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Port | \`8000\` (API) · \`80\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
+EOF
