@@ -10,7 +10,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/coti-fintech-payment-api
 
 jobs:
-  # ── Unit Tests ────────────────────────────────────────────────────────────────
+  #  UnitTests 
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -39,7 +39,7 @@ jobs:
           name: test-results
           path: app/test-results.xml
 
-  # ── Build Docker Image ────────────────────────────────────────────────────────
+  #  Build Docker Image 
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
@@ -80,7 +80,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # ── Trivy Security Scan ───────────────────────────────────────────────────────
+  #  Trivy Security Scan 
   security-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
@@ -103,8 +103,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
-          format: "sarif"
-          output: "trivy-results.sarif"
+          format: "table"
           severity: "HIGH,CRITICAL"
           exit-code: "1"
           ignore-unfixed: true
@@ -112,6 +111,7 @@ jobs:
           trivyignores: .trivyignore
         env:
           TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
+
 
       - name: Upload Trivy SARIF report
         uses: github/codeql-action/upload-sarif@v3
@@ -133,7 +133,7 @@ jobs:
         env:
           TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
 
-  # ── Deploy to Dev (develop branch only) ───────────────────────────────────────
+  #  Deploy to Dev (develop branch only) 
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
@@ -201,7 +201,7 @@ jobs:
           echo "| Port | \`8001\` (API) · \`8080\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
 
-  # ── Deploy to Staging (main branch only) ──────────────────────────────────────
+  #  Deploy to Staging (main branch only) 
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
