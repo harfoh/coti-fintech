@@ -1,4 +1,3 @@
-cat > .github/workflows/pipeline.yml << 'EOF'
 name: Coti Fintech CI/CD Pipeline
 
 on:
@@ -11,7 +10,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/coti-fintech-payment-api
 
 jobs:
-  #  Unitests 
+  # ── Unit Tests ────────────────────────────────────────────────────────────────
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -40,7 +39,7 @@ jobs:
           name: test-results
           path: app/test-results.xml
 
-  #  Build Docker Image 
+  # ── Build Docker Image ────────────────────────────────────────────────────────
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
@@ -81,7 +80,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  #  Trivy Security SCan 
+  # ── Trivy Security Scan ───────────────────────────────────────────────────────
   security-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
@@ -134,7 +133,7 @@ jobs:
         env:
           TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
 
-  #  Deploy to Dev (develop branch only) 
+  # ── Deploy to Dev (develop branch only) ───────────────────────────────────────
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
@@ -202,7 +201,7 @@ jobs:
           echo "| Port | \`8001\` (API) · \`8080\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
 
-  #  Deploy to Staging (main branch only) 
+  # ── Deploy to Staging (main branch only) ──────────────────────────────────────
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
@@ -269,4 +268,3 @@ jobs:
           echo "| Branch | \`main\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Port | \`8000\` (API) · \`80\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
-EOF
