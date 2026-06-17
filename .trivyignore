@@ -1,0 +1,11 @@
+# Starlette CVEs - acknowledged, no stable fix available yet
+# Tracking: https://avd.aquasec.com/nvd/cve-2026-54283
+CVE-2026-54283
+
+# Starlette SSRF via StaticFiles on Windows - not applicable (Linux containers)
+# Tracking: https://avd.aquasec.com/nvd/cve-2026-48818
+CVE-2026-48818
+
+# Starlette DoS via Range header
+# Tracking: https://avd.aquasec.com/nvd/cve-2025-62727
+CVE-2025-62727
