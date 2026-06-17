@@ -112,13 +112,6 @@ jobs:
         env:
           TRIVY_VULN_SEVERITY_SOURCE: "nvd,ghsa"
 
-
-      - name: Upload Trivy SARIF report
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: "trivy-results.sarif"
-
       - name: Trivy summary table
         if: always()
         uses: aquasecurity/trivy-action@master
