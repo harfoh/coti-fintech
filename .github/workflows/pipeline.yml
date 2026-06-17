@@ -10,7 +10,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/coti-fintech-payment-api
 
 jobs:
-  # Unittests 
+  # Unit Tests 
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -39,14 +39,20 @@ jobs:
           name: test-results
           path: app/test-results.xml
 
-  # build docker Image 
+  #  Build Docker Image 
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
     needs: test
+    outputs:
+      short_sha: ${{ steps.short_sha.outputs.short_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set short SHA
+        id: short_sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -74,7 +80,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  #Trivy security sCan 
+  #  Trivy Security sCan 
   security-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
@@ -91,12 +97,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull image for scanning
-        run: docker pull ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+        run: docker pull ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "HIGH,CRITICAL"
@@ -113,16 +119,16 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}
           format: "table"
           severity: "HIGH,CRITICAL"
           exit-code: "0"
 
-  # Deploy to Dev (develop branch only)
+  #  Deploy to Dev (develop branch only) 
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
-    needs: security-scan
+    needs: [build, security-scan]
     environment: dev
     if: github.ref == 'refs/heads/develop'
     steps:
@@ -139,7 +145,7 @@ jobs:
       - name: Deploy to dev
         env:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_TAG: sha-${{ needs.build.outputs.short_sha }}
         run: |
           docker compose -f docker-compose.dev.yml pull coti-payment-api 2>/dev/null || true
           docker compose -f docker-compose.dev.yml up -d --remove-orphans
@@ -181,16 +187,16 @@ jobs:
           echo "### 🛠️ Dev Deployment" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | \`${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Branch | \`develop\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Port | \`8001\` (API) · \`8080\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
 
-  # Deploy to Staging (main branch only) 
+  #  Deploy to Staging (main branch only) 
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    needs: security-scan
+    needs: [build, security-scan]
     environment: staging
     if: github.ref == 'refs/heads/main'
     steps:
@@ -207,7 +213,7 @@ jobs:
       - name: Deploy to staging
         env:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_TAG: sha-${{ needs.build.outputs.short_sha }}
         run: |
           docker compose pull coti-payment-api 2>/dev/null || true
           docker compose up -d --remove-orphans
@@ -249,7 +255,7 @@ jobs:
           echo "### 🚀 Staging Deployment" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | \`${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.IMAGE_NAME }}:sha-${{ needs.build.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Branch | \`main\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Port | \`8000\` (API) · \`80\` (Nginx) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ✅ Healthy |" >> $GITHUB_STEP_SUMMARY
